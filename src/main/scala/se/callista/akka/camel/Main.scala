@@ -1,10 +1,11 @@
 package se.callista.akka.camel
 
-import akka.camel.{Consumer, CamelMessage, Producer}
-import akka.actor.{Props, ActorSystem, Actor}
+import akka.camel.{Consumer, CamelMessage, Producer, AkkaCamelException}
+import akka.actor.{Props, ActorSystem, Actor }
 import scala.concurrent.duration._
 import util.parsing.json.{JSONObject, JSONArray}
 import akka.util
+import akka.actor.Status.Failure
 
 class HttpProducer(host: String) extends Producer {
   import System._
@@ -20,11 +21,14 @@ class HttpProducer(host: String) extends Producer {
     msg
   }
 
-  override def transformResponse(msg: Any): Any = msg match {
-    case msg: CamelMessage => {
-      val t = currentTimeMillis() - start
-      println("Response> " + threadName + " " + host)
-      msg.copy(headers = msg.headers ++ Map("Url" -> host, "RequestTime" -> t) )
+  override def transformResponse(msg: Any): Any = {
+    val t = currentTimeMillis() - start
+    msg match {
+      case msg: CamelMessage => {
+        println("Response> " + threadName + " " + host)
+        msg.copy(headers = msg.headers ++ Map("Url" -> host, "RequestTime" -> t) )
+      }
+      case Failure(ex) => CamelMessage("", Map("Url" -> host, "RequestTime" -> t, "Server" -> ex.getMessage))
     }
   }
 }
@@ -50,9 +54,6 @@ class HttpConsumer(hosts: List[String]) extends Consumer {
       r onSuccess  { case msg =>
         val headers = msg.map(_.headers(Set("Server", "Url", "RequestTime")))
         originalSender ! CamelMessage(new JSONArray( headers.map(new JSONObject(_))), Map("ContentType" -> "application/json"))
-      }
-      r onFailure { case msg =>
-        originalSender ! CamelMessage(new JSONObject(Map("error" -> msg)), Map("ContentType" -> "application/json"))
       }
     }
   }
